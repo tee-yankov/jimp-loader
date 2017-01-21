@@ -1,0 +1,9 @@
+{
+  "name": "jimp-loader",
+  "version": "1.0.0",
+  "description": "A loader using jimp to process images",
+  "main": "index.js",
+  "repository": "git@github.com:venoma333/jimp-loader.git",
+  "author": "Theodore Yankov",
+  "license": "MIT"
+}
