@@ -10,23 +10,41 @@ function getPath (config, content, name) {
   })
 }
 
+function _generateOutput (callback, originalPath, placeholderPath) {
+  callback(null, 'module.exports = {\
+    placeholder: __webpack_public_path__ + ' + JSON.stringify(placeholderPath) + ',\
+    original: __webpack_public_path__ + ' + JSON.stringify(originalPath) + '\
+  };')
+}
+
+var presets = {
+  blurred: {
+    blur: [20],
+    quality: [60]
+  }
+}
+
 module.exports = function (content) {
   this.cacheable && this.cacheable(true)
+  var env = process.env.NODE_ENV
 
   var emitFile = this.emitFile
 
   var callback = this.async()
 
-  if (!callback) throw new Error('gm loader unable to get callback for async')
+  var generateOutput = _generateOutput.bind(this, callback)
+
+  if (!callback) throw new Error('jimp loader unable to get callback for async')
   if (!emitFile) throw new Error('emitFile is required from the module system')
 
-  var configKey = 'gmLoader'
+  var configKey = 'jimpLoader'
 
   var defaults = {
     blur: 0,
     quality: 100,
     baseName: '[hash]',
     type: '',
+    transforms: {}
   }
 
   var query = loaderUtils.parseQuery(this.resourceQuery)
@@ -34,6 +52,8 @@ module.exports = function (content) {
   var options = loaderUtils.getLoaderConfig(this, configKey) || {}
 
   var config = Object.assign({}, defaults, options, query)
+
+  var transforms = config.transforms
 
   var getOutputUrl = getPath.bind(this, config, content)
 
@@ -61,32 +81,48 @@ module.exports = function (content) {
 
   switch (config.type) {
     case 'blurred':
-      jimp.read(content, function (err, image) {
-        if (err) return callback(err)
-        image
-          .blur(parseInt(config.blur, 10))
-          .quality(parseInt(config.quality, 10))
-          .getBuffer(jimp.AUTO, function (err, buffer) {
-            if (err) return callback(err)
-
-            var suffix = config.type ? '_' + config.type : ''
-            var placeholderPath = getOutputUrl(config.baseName + suffix)
-            var originalPath = getOutputUrl(config.baseName)
-
-            emitFile(placeholderPath, buffer)
-            emitFile(originalPath, content)
-
-            callback(null, 'module.exports = {\
-              placeholder: __webpack_public_path__ + ' + JSON.stringify(placeholderPath) + ',\
-              original: __webpack_public_path__ + ' + JSON.stringify(originalPath) + '\
-            };')
-          })
-      })
+      transforms = presets.blurred
       break
-    default:
-      emitFile(outputPath, content)
-      callback(null, 'module.exports = ' + publicPath + ';')
   }
+
+  if (!Object.keys(transforms).length) {
+    emitFile(outputPath, content)
+    callback(null, 'module.exports = ' + publicPath + ';')
+    return
+  }
+
+  var suffix = config.type ? '_' + config.type : ''
+  var placeholderPath = getOutputUrl(config.baseName + suffix)
+  var originalPath = getOutputUrl(config.baseName)
+
+  if (config.devMode) {
+    emitFile(originalPath, content)
+    emitFile(placeholderPath, content)
+    generateOutput(originalPath, placeholderPath)
+    return
+  }
+
+  jimp.read(content, function (err, image) {
+    console.log('Processing ', getOutputUrl('[name]'))
+
+    if (err) return callback(err)
+    var jimpContext = this
+
+    Object.keys(transforms)
+      .forEach(function (transform) {
+        console.log('Applying ', transform, ':', transforms[transform])
+        image[transform].apply(jimpContext, transforms[transform])
+      })
+
+    image.getBuffer(jimp.AUTO, function (err, buffer) {
+      if (err) return callback(err)
+
+      emitFile(placeholderPath, buffer)
+      emitFile(originalPath, content)
+
+      generateOutput(originalPath, placeholderPath)
+    })
+  })
 }
 
 // Pass in the content as a Buffer, rather than a UTF-8 string
